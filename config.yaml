@@ -1,0 +1,16 @@
+models:
+  - name: "gpt-fast"
+    type: "openai"
+    api_key: "sk-..."
+    actual_model_name: "gpt-4o-mini"
+    base_url: "https://api.openai.com/v1"
+
+  - name: "gemini-pro"
+    type: "gemini"
+    api_key: "AIza..."
+    actual_model_name: "gemini-1.5-pro"
+
+  - name: "claude-opus"
+    type: "claude"
+    api_key: "sk-ant-..."
+    actual_model_name: "claude-3-opus-20240229"
