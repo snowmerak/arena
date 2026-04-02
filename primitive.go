@@ -228,3 +228,105 @@ func (f Float64) Set(v float64) {
 	bits := math.Float64bits(v)
 	binary.LittleEndian.PutUint64(f.arena.buffer[f.offset:f.offset+8], bits)
 }
+
+// Complex64 wrapper
+type Complex64 struct {
+	arena  *Arena
+	offset int
+}
+
+func (a *Arena) AllocComplex64() (Complex64, error) {
+	offset, err := a.Alloc(8)
+	if err != nil {
+		return Complex64{}, err
+	}
+	return Complex64{arena: a, offset: offset}, nil
+}
+
+func (c Complex64) Get() complex64 {
+	r := math.Float32frombits(binary.LittleEndian.Uint32(c.arena.buffer[c.offset : c.offset+4]))
+	i := math.Float32frombits(binary.LittleEndian.Uint32(c.arena.buffer[c.offset+4 : c.offset+8]))
+	return complex(r, i)
+}
+
+func (c Complex64) Set(v complex64) {
+	binary.LittleEndian.PutUint32(c.arena.buffer[c.offset:c.offset+4], math.Float32bits(real(v)))
+	binary.LittleEndian.PutUint32(c.arena.buffer[c.offset+4:c.offset+8], math.Float32bits(imag(v)))
+}
+
+// Complex128 wrapper
+type Complex128 struct {
+	arena  *Arena
+	offset int
+}
+
+func (a *Arena) AllocComplex128() (Complex128, error) {
+	offset, err := a.Alloc(16)
+	if err != nil {
+		return Complex128{}, err
+	}
+	return Complex128{arena: a, offset: offset}, nil
+}
+
+func (c Complex128) Get() complex128 {
+	r := math.Float64frombits(binary.LittleEndian.Uint64(c.arena.buffer[c.offset : c.offset+8]))
+	i := math.Float64frombits(binary.LittleEndian.Uint64(c.arena.buffer[c.offset+8 : c.offset+16]))
+	return complex(r, i)
+}
+
+func (c Complex128) Set(v complex128) {
+	binary.LittleEndian.PutUint64(c.arena.buffer[c.offset:c.offset+8], math.Float64bits(real(v)))
+	binary.LittleEndian.PutUint64(c.arena.buffer[c.offset+8:c.offset+16], math.Float64bits(imag(v)))
+}
+
+// String wrapper
+type String struct {
+	arena  *Arena
+	offset int
+}
+
+type Primitive interface {
+	Int8 | Int16 | Int32 | Int64 |
+		Uint8 | Uint16 | Uint32 | Uint64 |
+		Float32 | Float64 |
+		Complex64 | Complex128 |
+		String
+}
+
+func (a *Arena) AllocString(v string) (String, error) {
+	// 8 bytes for data offset, 8 bytes for length
+	headerOffset, err := a.Alloc(16)
+	if err != nil {
+		return String{}, err
+	}
+
+	dataOffset, err := a.Alloc(len(v))
+	if err != nil {
+		return String{}, err
+	}
+
+	binary.LittleEndian.PutUint64(a.buffer[headerOffset:headerOffset+8], uint64(dataOffset))
+	binary.LittleEndian.PutUint64(a.buffer[headerOffset+8:headerOffset+16], uint64(len(v)))
+	copy(a.buffer[dataOffset:dataOffset+len(v)], v)
+
+	return String{arena: a, offset: headerOffset}, nil
+}
+
+func (s String) Get() string {
+	dataOffset := int(binary.LittleEndian.Uint64(s.arena.buffer[s.offset : s.offset+8]))
+	length := int(binary.LittleEndian.Uint64(s.arena.buffer[s.offset+8 : s.offset+16]))
+	return string(s.arena.buffer[dataOffset : dataOffset+length])
+}
+
+func (s String) Set(v string) error {
+	dataOffset, err := s.arena.Alloc(len(v))
+	if err != nil {
+		return err
+	}
+
+	binary.LittleEndian.PutUint64(s.arena.buffer[s.offset:s.offset+8], uint64(dataOffset))
+	binary.LittleEndian.PutUint64(s.arena.buffer[s.offset+8:s.offset+16], uint64(len(v)))
+	copy(s.arena.buffer[dataOffset:dataOffset+len(v)], v)
+
+	return nil
+}

@@ -10,14 +10,34 @@ var schemaCache sync.Map // map[reflect.Type]*StructSchema
 
 // FieldInfo contains offset and type information for a mapped struct field.
 type FieldInfo struct {
-	Offset int
-	Kind   reflect.Kind
+	Offset     int
+	Kind       reflect.Kind
+	ElemKind   reflect.Kind  // For arrays
+	Len        int           // For arrays
+	ElemSchema *StructSchema // For arrays of structs
 }
 
 // StructSchema stores the total packed size and field mappings for a struct.
 type StructSchema struct {
 	Size   int
 	Fields map[string]FieldInfo
+}
+
+func getKindSize(kind reflect.Kind) (int, error) {
+	switch kind {
+	case reflect.Int8, reflect.Uint8:
+		return 1, nil
+	case reflect.Int16, reflect.Uint16:
+		return 2, nil
+	case reflect.Int32, reflect.Uint32, reflect.Float32:
+		return 4, nil
+	case reflect.Int64, reflect.Uint64, reflect.Float64, reflect.Complex64:
+		return 8, nil
+	case reflect.Complex128, reflect.String:
+		return 16, nil
+	default:
+		return 0, fmt.Errorf("unsupported kind %s", kind)
+	}
 }
 
 // buildSchema uses reflection to tightly pack primitive fields sequentially.
@@ -39,20 +59,52 @@ func buildSchema(t reflect.Type) (*StructSchema, error) {
 		kind := f.Type.Kind()
 
 		var size int
-		switch kind {
-		case reflect.Int8, reflect.Uint8:
-			size = 1
-		case reflect.Int16, reflect.Uint16:
-			size = 2
-		case reflect.Int32, reflect.Uint32, reflect.Float32:
-			size = 4
-		case reflect.Int64, reflect.Uint64, reflect.Float64:
-			size = 8
-		default:
-			return nil, fmt.Errorf("unsupported field type %s for field %s", kind, f.Name)
+		var elemKind reflect.Kind
+		var arrayLen int
+		var elemSchema *StructSchema
+
+		if kind == reflect.Array {
+			elemType := f.Type.Elem()
+			elemKind = elemType.Kind()
+			var elemSize int
+			if elemKind == reflect.Struct {
+				var err error
+				elemSchema, err = GetSchema(elemType)
+				if err != nil {
+					return nil, err
+				}
+				elemSize = elemSchema.Size
+			} else {
+				var err error
+				elemSize, err = getKindSize(elemKind)
+				if err != nil {
+					return nil, fmt.Errorf("unsupported array element type %s for field %s", elemKind, f.Name)
+				}
+			}
+			arrayLen = f.Type.Len()
+			size = elemSize * arrayLen
+		} else if kind == reflect.Struct {
+			var err error
+			elemSchema, err = GetSchema(f.Type)
+			if err != nil {
+				return nil, err
+			}
+			size = elemSchema.Size
+		} else {
+			var err error
+			size, err = getKindSize(kind)
+			if err != nil {
+				return nil, fmt.Errorf("unsupported field type %s for field %s", kind, f.Name)
+			}
 		}
 
-		schema.Fields[f.Name] = FieldInfo{Offset: offset, Kind: kind}
+		schema.Fields[f.Name] = FieldInfo{
+			Offset:     offset,
+			Kind:       kind,
+			ElemKind:   elemKind,
+			Len:        arrayLen,
+			ElemSchema: elemSchema,
+		}
 		offset += size
 	}
 
@@ -180,4 +232,81 @@ func (s StructInstance) FieldFloat64(name string) (Float64, error) {
 		return Float64{}, fmt.Errorf("field %s missing or not float64", name)
 	}
 	return Float64{arena: s.arena, offset: s.offset + info.Offset}, nil
+}
+
+func (s StructInstance) FieldComplex64(name string) (Complex64, error) {
+	info, ok := s.schema.Fields[name]
+	if !ok || info.Kind != reflect.Complex64 {
+		return Complex64{}, fmt.Errorf("field %s missing or not complex64", name)
+	}
+	return Complex64{arena: s.arena, offset: s.offset + info.Offset}, nil
+}
+
+func (s StructInstance) FieldComplex128(name string) (Complex128, error) {
+	info, ok := s.schema.Fields[name]
+	if !ok || info.Kind != reflect.Complex128 {
+		return Complex128{}, fmt.Errorf("field %s missing or not complex128", name)
+	}
+	return Complex128{arena: s.arena, offset: s.offset + info.Offset}, nil
+}
+
+func (s StructInstance) FieldString(name string) (String, error) {
+	info, ok := s.schema.Fields[name]
+	if !ok || info.Kind != reflect.String {
+		return String{}, fmt.Errorf("field %s missing or not string", name)
+	}
+	return String{arena: s.arena, offset: s.offset + info.Offset}, nil
+}
+
+func (s StructInstance) FieldArray(name string) (any, error) {
+	info, ok := s.schema.Fields[name]
+	if !ok || info.Kind != reflect.Array {
+		return nil, fmt.Errorf("field %s missing or not array", name)
+	}
+
+	if info.ElemKind == reflect.Struct {
+		return StructArrayInstance{
+			arena:      s.arena,
+			offset:     s.offset + info.Offset,
+			length:     info.Len,
+			elemStride: info.ElemSchema.Size,
+			schema:     info.ElemSchema,
+		}, nil
+	}
+
+	elemStride, err := getKindSize(info.ElemKind)
+	if err != nil {
+		return nil, err
+	}
+
+	switch info.ElemKind {
+	case reflect.Int8:
+		return ArrayInstance[Int8]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Int16:
+		return ArrayInstance[Int16]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Int32:
+		return ArrayInstance[Int32]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Int64:
+		return ArrayInstance[Int64]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Uint8:
+		return ArrayInstance[Uint8]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Uint16:
+		return ArrayInstance[Uint16]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Uint32:
+		return ArrayInstance[Uint32]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Uint64:
+		return ArrayInstance[Uint64]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Float32:
+		return ArrayInstance[Float32]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Float64:
+		return ArrayInstance[Float64]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Complex64:
+		return ArrayInstance[Complex64]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.Complex128:
+		return ArrayInstance[Complex128]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	case reflect.String:
+		return ArrayInstance[String]{arena: s.arena, offset: s.offset + info.Offset, length: info.Len, elemStride: elemStride}, nil
+	default:
+		return nil, fmt.Errorf("unsupported array element type %s", info.ElemKind)
+	}
 }
