@@ -22,8 +22,20 @@ type ModelConfig struct {
 	BaseURL         string       `yaml:"base_url,omitempty"`
 }
 
+type EmbeddingConfig struct {
+	BaseURL             string  `yaml:"base_url"`
+	Model               string  `yaml:"model"`
+	SimilarityThreshold float64 `yaml:"similarity_threshold"`
+}
+
+type RedisConfig struct {
+	URL string `yaml:"url"`
+}
+
 type Config struct {
-	Models []ModelConfig `yaml:"models"`
+	Models    []ModelConfig   `yaml:"models"`
+	Embedding EmbeddingConfig `yaml:"embedding"`
+	Redis     RedisConfig     `yaml:"redis"`
 }
 
 func LoadConfig(path string) (*Config, error) {

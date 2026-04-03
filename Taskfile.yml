@@ -1,0 +1,23 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build the Go application
+    cmds:
+      - go build -o gateway.exe ./cmd/gateway
+
+  infra:up:
+    desc: Start infrastructure dependencies
+    cmds:
+      - docker compose up -d --wait
+
+  infra:down:
+    desc: Stop infrastructure dependencies
+    cmds:
+      - docker compose down -v
+
+  test:integration:
+    desc: Run integration tests with infrastructure active
+    deps: [infra:up]
+    cmds:
+      - go test -v ./... -tags=integration

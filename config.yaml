@@ -1,3 +1,11 @@
+embedding:
+  base_url: "http://localhost:1234/v1"
+  model: "text-embedding-qwen3-embedding-0.6b"
+  similarity_threshold: 0.95
+
+redis:
+  url: "redis://localhost:6379"
+
 models:
   - name: "gpt-fast"
     type: "openai"
